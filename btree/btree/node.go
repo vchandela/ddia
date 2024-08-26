@@ -3,11 +3,21 @@ package btree
 import "bytes"
 
 const (
-	degree      = 5               // min child pointers a non-leaf node can have
-	maxChildren = 2 * degree      // 10
-	maxItems    = maxChildren - 1 // 9
-	minItems    = degree - 1      // 4
+	degree      = 2               // min child pointers a non-leaf node can have
+	maxChildren = 2 * degree      // 4
+	maxItems    = maxChildren - 1 // 3
+	minItems    = degree - 1      // 1
 )
+
+/*
+data item in a node.
+key uniquely identifies a data item and used for sorting them.
+val contains actual data
+*/
+type item struct {
+	key []byte
+	val []byte
+}
 
 type node struct {
 	// use fixed-size arrays over slices to avoid costly slice expansion operations during insertion.
@@ -172,7 +182,7 @@ func (n *node) removeChildAt(pos int) *node {
 
 /*
 2 possibilities for deleting a data item -- for leaf node, simply remove the item;
-for non-leaf node, we remove the item's inorder successor from the leaf node that it resides at and then return it to 
+for non-leaf node, we remove the item's inorder successor from the leaf node that it resides at and then return it to
 the preceding call in the call stack so that it can be used to for replacing the original data item that we intended to delete.
 In both cases, we might face "underflow" in leaf node i.e it contains fewer items than minItems.
 To fix this, we need to borrow an item from a sibling node or merge the node with a sibling node.
@@ -213,13 +223,13 @@ func (n *node) fillChildAt(pos int) {
 		}
 		// Borrow the left-most item from the right node to replace the parent item.
 		n.items[pos] = right.removeItemAt(0)
-	
+
 	// There are no suitable nodes to borrow items from, so perform a merge.
 	default:
 		// If we are at the right-most child pointer, merge the node with its left sibling.
 		// In all other cases, we prefer to merge the node with its right sibling for simplicity.
 		if pos >= n.numChildren-1 {
-			pos = n.numChildren-2
+			pos = n.numChildren - 2
 		}
 		// Establish our left and right nodes.
 		left, right := n.children[pos], n.children[pos+1]
@@ -241,12 +251,12 @@ func (n *node) fillChildAt(pos int) {
 }
 
 /*
-For actual deletion, traverse the tree recursively from its root, searching for a data item matching 
-the key that we want to delete. 
+For actual deletion, traverse the tree recursively from its root, searching for a data item matching
+the key that we want to delete.
 2 possibilities for deleting a data item -- for leaf node, simply remove the item;
-for non-leaf node, we remove the item's inorder successor from the leaf node that it resides at and then return it to 
+for non-leaf node, we remove the item's inorder successor from the leaf node that it resides at and then return it to
 the preceding call in the call stack so that it can be used to for replacing the original data item that we intended to delete.
-As we traverse the tree back up from the leaf to the root, we check whether we have caused an underflow with our deletion or 
+As we traverse the tree back up from the leaf to the root, we check whether we have caused an underflow with our deletion or
 with any subsequent merges and perform the respective repairs.
 */
 func (n *node) delete(key []byte, isSeekingSuccessor bool) *item {
