@@ -2,7 +2,6 @@ package skiplist
 
 import (
 	"bytes"
-	"fmt"
 	"lsm/fastrand"
 	"math"
 )
@@ -83,16 +82,16 @@ func (sl *SkipList) search(key []byte) (*node, [MaxHeight]*node) {
 	return nil, journey
 }
 
-func (sl *SkipList) Get(key []byte) ([]byte, error) {
+func (sl *SkipList) Get(key []byte) ([]byte, bool) {
 	n, _ := sl.search(key)
 
 	if n != nil {
-		return n.val, nil
+		return n.val, true
 	}
-	return nil, fmt.Errorf("key not found")
+	return nil, false
 }
 
-func (sl *SkipList) Put(key, val []byte) {
+func (sl *SkipList) Insert(key, val []byte) {
 	n, journey := sl.search(key)
 
 	//update value of existing key

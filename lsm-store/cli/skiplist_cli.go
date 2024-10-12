@@ -71,7 +71,7 @@ func (c *CLI) processSetCommand(args []string) {
 		fmt.Println("Usage: SET <key> <value>")
 		return
 	}
-	c.skipList.Put([]byte(args[0]), []byte(args[1]))
+	c.skipList.Insert([]byte(args[0]), []byte(args[1]))
 	fmt.Println(c.skipList)
 }
 
@@ -94,9 +94,9 @@ func (c *CLI) processGetCommand(args []string) {
 		fmt.Println("Usage: GET <key>")
 		return
 	}
-	val, err := c.skipList.Get([]byte(args[0]))
+	val, found := c.skipList.Get([]byte(args[0]))
 
-	if err != nil {
+	if !found {
 		fmt.Println("Key not found.")
 		return
 	}
