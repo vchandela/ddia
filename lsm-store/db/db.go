@@ -4,10 +4,12 @@ import (
 	"fmt"
 	"log"
 	"lsm/memtable"
+	"lsm/sstable"
 )
 
 const (
-	memtableSizeLimit = 4 << 10 // 4 KiB
+	memtableSizeLimit      = 4 << 10 // 4 KiB
+	memtableFlushThreshold = 8 << 10 // 8 KiB
 )
 
 type MemTables struct {
@@ -16,14 +18,19 @@ type MemTables struct {
 }
 
 type DB struct {
-	memtables MemTables
+	memtables   MemTables
+	dataStorage *sstable.Provider
 }
 
-func Open() *DB {
-	db := &DB{}
+func Open(dirname string) (*DB, error) {
+	dataStorage, err := sstable.NewProvider(dirname)
+	if err != nil {
+		return nil, err
+	}
+	db := &DB{dataStorage: dataStorage}
 	db.memtables.mutable = memtable.NewMemtable(memtableSizeLimit)
 	db.memtables.queue = append(db.memtables.queue, db.memtables.mutable)
-	return db
+	return db, nil
 }
 
 func (d *DB) rotateMemtables() *memtable.Memtable {
@@ -40,9 +47,51 @@ func (d *DB) prepMemtableForKV(key, val []byte) *memtable.Memtable {
 	return m
 }
 
+func (d *DB) flushMemtables() error {
+	n := len(d.memtables.queue) - 1
+	flushable := d.memtables.queue[:n]
+	// update the queue to discard flushed memtables
+	d.memtables.queue = d.memtables.queue[n:]
+
+	for i:=0; i<len(flushable); i++ {
+		meta := d.dataStorage.PrepareNewFile()
+		f, err := d.dataStorage.OpenFileForWriting(meta)
+		if err != nil {
+			return err
+		}
+
+		w := sstable.NewWriter(f)
+		err = w.Convert(flushable[i])
+		if err != nil {
+			return err
+		}
+
+		err = w.Close()
+		if err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (d *DB) maybeScheduleFlush() {
+	var totalSize int
+	for i := 0; i < len(d.memtables.queue); i++ {
+		totalSize += d.memtables.queue[i].Size()
+	}
+	fmt.Printf("Total size of memtables: %d\n", totalSize)
+	if totalSize > memtableFlushThreshold {
+		err := d.flushMemtables()
+		if err != nil {
+			log.Fatalf(err.Error())
+		}
+	}
+}
+
 func (d *DB) Set(key, val []byte) {
 	m := d.prepMemtableForKV(key, val)
 	m.Insert(key, val)
+	d.maybeScheduleFlush()
 }
 
 func (d *DB) Get(key []byte) ([]byte, error) {
@@ -66,4 +115,5 @@ func (d *DB) Get(key []byte) ([]byte, error) {
 func (d *DB) Delete(key []byte) {
 	m := d.prepMemtableForKV(key, nil)
 	m.InsertTombstone(key)
+	d.maybeScheduleFlush()
 }

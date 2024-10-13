@@ -1,4 +1,4 @@
-package encoder
+package memtable
 
 type OpKind uint8
 

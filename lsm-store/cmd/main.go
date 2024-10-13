@@ -2,6 +2,7 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"lsm/db"
 )
 
@@ -14,10 +15,17 @@ func main() {
 
 	// test lsm (memtable only)
 	key := []byte("hello")
-	val := []byte("world")
 
-	d := db.Open()
-	d.Set(key, val)
+	const dataFolder = "sst-store"
+	d, err := db.Open(dataFolder)
+	if err != nil {
+		log.Fatal(err)
+	}
+	for i := range(1000) {
+		key = []byte(fmt.Sprintf("hello%d", i))
+		val := []byte(fmt.Sprintf("world%d", i))
+		d.Set(key, val)
+	}
 	val1, err := d.Get(key)
 	if err != nil {
 		fmt.Println(err.Error())

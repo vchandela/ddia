@@ -1,6 +1,14 @@
 ## Memtable
 - Most DBs use skiplists as underlying DS for memtable. Skiplist-based memtable provide good overall performance for both read/write operations regardless of whether sequential or random access patterns are used. [Ref](https://www.cloudcentric.dev/exploring-memtables/)
-- Memtable -conversion to `.sst`-> SSTable
+- Read-only memtables -conversion to `.sst`-> SSTables. We don't touch the mutable memtable.
+  - Trigger condition: When a new record is added, check if size of all memtables (mutable + non-mutable) exceeds the configured threshold.
+  - `.sst` files are sorted by keys in ascending order. So, we need to scan the first level of skiplist to get this.
+  - `.sst` Format
+    - M-1: data block: keyLen (2B)|valLen (2B)|key (keyLen bytes)|opKind (1B)|val (valLen bytes)
+      - Do buffered I/O of 4KB to match OS page size and block size on disks.
+      - `storageManager` manages primary data folder of storage engine that contains all
+      `.sst` files produced.
+      - `writer.go` converts a memtable to a `.sst` file.
 - Deletion requires marking keys using `tombstones` because all memtables except the current one are read-only. So, we can't delete the key(s) from them.
   - For this, we use a byte called `OpKey` and append the value of our kv-pair to it.
       - encoded value = `OpKey` + value
