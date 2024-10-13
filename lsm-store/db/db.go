@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"lsm/encoder"
 	"lsm/memtable"
 	"lsm/sstable"
 )
@@ -24,7 +25,7 @@ type DB struct {
 	sstables    []*sstable.FileMetadata
 }
 
-// After restarting our database storage engine, data previously stored on 
+// After restarting our database storage engine, data previously stored on
 // disk becomes inaccessible. To prvent this, we need to load all SSTables on DB restarts.
 func (d *DB) loadSSTables() error {
 	meta, err := d.dataStorage.ListFiles()
@@ -143,10 +144,13 @@ func (d *DB) Get(key []byte) ([]byte, error) {
 		if err != nil {
 			return nil, err
 		}
-		r := sstable.NewReader(f)
+		r, err := sstable.NewReader(f)
+		if err != nil {
+			log.Fatalf("unable to initialize reader")
+		}
 		defer r.Close()
 
-		var encodedValue *memtable.EncodedValue
+		var encodedValue *encoder.EncodedValue
 		encodedValue, err = r.Get(key)
 		if err != nil {
 			if errors.Is(err, fmt.Errorf("key not found")) {

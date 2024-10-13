@@ -18,11 +18,22 @@
     - We're doing binary search on the index block but decide whether to drop left/right portion based on the key at that index.
     - Note: index blocks incur a significant storage overhead of 10-15%.
     - Interesting comparision of sequential vs binary search: [Ref](https://www.cloudcentric.dev/exploring-sstables/#benchmarking-binary-search)
+      - When we are looking through small amounts of data (e.g., data fitting within a single 4 KiB block), sequential search may sometimes be faster.
+      - When the amount of data read from disk becomes significantly larger, amortizing the cost of disk I/O operations, binary search is better.
   - Optimization-4: Have smaller index blocks + avoid loading entire `.sst` into memory.
     - Observation: Our filesystem works with a default size of 4096 bytes. Any data beyond 4KB will need > 1 block from disk -> > 1 disk IO. So, our data blocks are capped at 4096 bytes.
     - New terminology: `data block` can have multiple `data entry` (individual kv-pair)
-    - Instead of having offset of each kv-pair (`data entry`), we can now have {starting offset of each `data block`, total length, largest key}.
+    - In the index block, instead of having offset of each kv-pair (`data entry`), we can now have {starting offset of each `data block`, total length, largest key}.
     - So, we'll use binary search across `data blocks` but sequential search within each `data block`. With block size of 4096 bytes, search will still be O(logn).
+    - For this, we'll load up only the index block into memory, and then use it to locate and load the specific data block in memory and perform sequential search.
+    - This will allow us to search very big `*.sst` files with no more than 3 disk accesses.
+      - 1 disk access to read the footer
+      - another one to read the index block
+      - third one to read the data block
+    - The worst-case scenario is 3 times slower only because we are performing 3 times as many disk accesses. 3 disk accesses for the newest SSTable, and 9 disk accesses for the oldest SSTable.
+      - Looking up the first key in the middle data block of the newest SSTable (roughly the best-case scenario).
+      - Looking up the last key in the last data block of the oldest SSTable (roughly the worst-case scenario)
+    - The index block now only takes 1% of our `*.sst` files.
 
 ## Memtable
 - Most DBs use skiplists as underlying DS for memtable. Skiplist-based memtable provide good overall performance for both read/write operations regardless of whether sequential or random access patterns are used. [Ref](https://www.cloudcentric.dev/exploring-memtables/)
