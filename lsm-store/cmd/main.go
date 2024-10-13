@@ -14,7 +14,7 @@ func main() {
 	// cli.Start()
 
 	// test lsm (memtable only)
-	key := []byte("hello")
+	key := []byte("hi")
 
 	const dataFolder = "sst-store"
 	d, err := db.Open(dataFolder)
@@ -22,7 +22,7 @@ func main() {
 		log.Fatal(err)
 	}
 	for i := range(1000) {
-		key = []byte(fmt.Sprintf("hello%d", i))
+		key = []byte(fmt.Sprintf("hi%d", i))
 		val := []byte(fmt.Sprintf("world%d", i))
 		d.Set(key, val)
 	}

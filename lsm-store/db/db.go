@@ -24,12 +24,33 @@ type DB struct {
 	sstables    []*sstable.FileMetadata
 }
 
+// After restarting our database storage engine, data previously stored on 
+// disk becomes inaccessible. To prvent this, we need to load all SSTables on DB restarts.
+func (d *DB) loadSSTables() error {
+	meta, err := d.dataStorage.ListFiles()
+	if err != nil {
+		return err
+	}
+	for _, f := range meta {
+		if !f.IsSSTable() {
+			continue
+		}
+		d.sstables = append(d.sstables, f)
+	}
+	return nil
+}
+
 func Open(dirname string) (*DB, error) {
 	dataStorage, err := sstable.NewProvider(dirname)
 	if err != nil {
 		return nil, err
 	}
 	db := &DB{dataStorage: dataStorage}
+
+	err = db.loadSSTables()
+	if err != nil {
+		return nil, err
+	}
 	db.memtables.mutable = memtable.NewMemtable(memtableSizeLimit)
 	db.memtables.queue = append(db.memtables.queue, db.memtables.mutable)
 	return db, nil
