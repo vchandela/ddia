@@ -2,9 +2,9 @@ package sstable
 
 import (
 	"bufio"
+	"bytes"
 	"encoding/binary"
 	"io"
-	"log"
 	"lsm/memtable"
 )
 
@@ -17,33 +17,46 @@ type syncCloser interface {
 type Writer struct {
 	file syncCloser
 	bw   *bufio.Writer
-	buf  []byte
+	buf  *bytes.Buffer
 }
 
 func NewWriter(file io.Writer) *Writer {
 	w := &Writer{}
 	bw := bufio.NewWriter(file)
 	w.file, w.bw = file.(syncCloser), bw
-	w.buf = make([]byte, 0, 1024)
+	w.buf = bytes.NewBuffer(make([]byte, 0, 1024))
 	return w
 }
 
 // write each kv-pair in memtable to `.sst` file by
 // 1. copying each pair to writer.buf
 // 2. writing the writer.buf to writer.file
-// data block: keyLen (2B)|valLen (2B)|key (keyLen bytes)|opKind (1B)|val (valLen bytes)
+// Naive data block: keyLen (2B)|valLen (2B)|key (keyLen bytes)|opKind (1B)|val (valLen bytes)
+// Optimised data block: write keys and values of any length while only using the minimal amount
+// of space for keylen and valLen.
+// Instead of 4B + keylen + valLen bytes, we need n + keylen + valLen bytes.
 func (w *Writer) writeDataBlock(key, encodedVal []byte) error {
 	keyLen, valLen := len(key), len(encodedVal)
-	bytesNeeded := 4 + keyLen + valLen
-	buf := w.buf[:bytesNeeded]
-	binary.LittleEndian.PutUint16(buf[:], uint16(keyLen))
-	binary.LittleEndian.PutUint16(buf[2:], uint16(valLen))
-	copy(buf[4:], key)
-	copy(buf[4+keyLen:], encodedVal)
+	needed := 2*binary.MaxVarintLen64 + keyLen + valLen // 20 + keyLen + valLen
+	available := w.buf.Available()
+	// if the buffer is not big enough, grow it to handle larger data blobs
+	if needed > available {
+		w.buf.Grow(needed)
+	}
 
-	bytesWritten, err := w.bw.Write(buf)
+	buf := w.buf.AvailableBuffer()
+	buf = buf[:needed]
+	n := binary.PutUvarint(buf, uint64(keyLen))
+	n += binary.PutUvarint(buf[n:], uint64(valLen))
+	copy(buf[n:], key)
+	copy(buf[n+keyLen:], encodedVal)
+	used := n + keyLen + valLen
+	_, err := w.buf.Write(buf[:used])
 	if err != nil {
-		log.Fatal(err, bytesWritten)
+		return err
+	}
+	_, err = w.bw.ReadFrom(w.buf)
+	if err != nil {
 		return err
 	}
 	return nil

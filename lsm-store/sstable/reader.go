@@ -26,19 +26,23 @@ func NewReader(file io.Reader) *Reader {
 
 func (r *Reader) Get(searchKey []byte) (*memtable.EncodedValue, error) {
 	for {
-		buf := r.buf[:4]
-		_, err := io.ReadFull(r.br, buf)
+		keyLen, err := binary.ReadUvarint(r.br)
 		if err != nil {
 			if err == io.EOF {
 				break
 			}
 			return nil, err
 		}
-		keyLen := binary.LittleEndian.Uint16(buf[:2])
-		valLen := binary.LittleEndian.Uint16(buf[2:])
-		bytesNeeded := keyLen + valLen
+		valLen, err := binary.ReadUvarint(r.br)
+		if err != nil {
+			return nil, err
+		}
+		needed := int(keyLen + valLen)
 
-		buf = r.buf[:bytesNeeded]
+		if cap(r.buf) < needed {
+			r.buf = make([]byte, needed)
+		}
+		buf := r.buf[:needed]
 		_, err = io.ReadFull(r.br, buf)
 		if err != nil {
 			return nil, err
