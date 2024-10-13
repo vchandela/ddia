@@ -1,3 +1,6 @@
+## SSTable
+
+
 ## Memtable
 - Most DBs use skiplists as underlying DS for memtable. Skiplist-based memtable provide good overall performance for both read/write operations regardless of whether sequential or random access patterns are used. [Ref](https://www.cloudcentric.dev/exploring-memtables/)
 - Read-only memtables -conversion to `.sst`-> SSTables. We don't touch the mutable memtable.

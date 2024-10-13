@@ -1,10 +1,36 @@
 package main
 
 import (
+	"bufio"
+	"flag"
 	"fmt"
 	"log"
+	"lsm/cli"
 	"lsm/db"
+	"os"
+
+	"github.com/go-faker/faker/v4"
 )
+
+const dataFolder = "demo"
+
+var shouldReset, shouldSeed *bool
+var seedNumRecords *int
+
+func eraseDataFolder() {
+	err := os.RemoveAll("demo")
+	if err != nil {
+		panic(err)
+	}
+}
+
+func seedDatabaseWithTestRecords(d *db.DB) {
+	for i := 0; i < *seedNumRecords; i++ {
+		k := []byte(faker.Word() + faker.Word())
+		v := []byte(faker.Word() + faker.Word())
+		d.Set(k, v)
+	}
+}
 
 func main() {
 	// // test skip list
@@ -13,30 +39,33 @@ func main() {
 	// cli := cli.NewCLI(scanner, sl)
 	// cli.Start()
 
-	// test lsm (memtable only)
-	key := []byte("hi")
+	setupFlags()
 
-	const dataFolder = "sst-store"
+	if *shouldReset {
+		eraseDataFolder()
+	}
+
 	d, err := db.Open(dataFolder)
 	if err != nil {
 		log.Fatal(err)
 	}
-	for i := range(1000) {
-		key = []byte(fmt.Sprintf("hi%d", i))
-		val := []byte(fmt.Sprintf("world%d", i))
-		d.Set(key, val)
+
+	if *shouldSeed {
+		seedDatabaseWithTestRecords(d)
 	}
-	val1, err := d.Get(key)
-	if err != nil {
-		fmt.Println(err.Error())
-	} else {
-		fmt.Printf("Found val:%s for key:%s\n", string(val1), string(key))
+
+	scanner := bufio.NewScanner(os.Stdin)
+	demo := cli.NewCLI(scanner, d)
+	demo.Start()
+}
+
+func setupFlags() {
+	shouldReset = flag.Bool("reset", false, "Reset the database by erasing its folder before startup.")
+	shouldSeed = flag.Bool("seed", false, "Seed the database using records created with go-faker.")
+	seedNumRecords = flag.Int("records", 1000, "Amount of records to seed the database with upon startup.")
+	flag.Usage = func() {
+		fmt.Println("\nDB CLI\n\nArguments:")
+		flag.PrintDefaults()
 	}
-	d.Delete(key)
-	val1, err = d.Get(key)
-	if err != nil {
-		fmt.Println(err.Error())
-	} else {
-		fmt.Printf("Found val:%s for key:%s\n", string(val1), string(key))
-	}
+	flag.Parse()
 }
