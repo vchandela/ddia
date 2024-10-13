@@ -84,7 +84,7 @@ func (d *DB) flushMemtables() error {
 		}
 
 		w := sstable.NewWriter(f)
-		err = w.Convert(flushable[i])
+		err = w.ConvertMemtableToSST(flushable[i])
 		if err != nil {
 			return err
 		}

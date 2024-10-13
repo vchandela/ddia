@@ -3,14 +3,26 @@
 - `storageManager` manages primary data folder of storage engine that contains all `.sst` files produced.
 - `writer.go` converts a memtable to a `.sst` file.
 - `.sst` Format
-  - M-1: data block: keyLen (2B)|valLen (2B)|key (keyLen bytes)|opKind (1B)|val (valLen bytes)
+  - Approach: data block: keyLen (2B)|valLen (2B)|key (keyLen bytes)|opKind (1B)|val (valLen bytes)
     - We made assumption that all kv-pairs with their metadata will fit into 1KiB size buffer.
     - 1KiB buffer allows size of key & val > 255 bytes -> we used uint16 (2B) to store keyLen & valLen.
     - 2 issues -- 1. user can enter larger blobs and 2. majority kv-pairs are short in size, so their lengths can fit in type smaller than uint16.
-    - Solution: Varint Encoding [Ref](https://www.cloudcentric.dev/exploring-sstables/)
-      - e.g 64-bit integers require 8 bytes. With varint encoding, we can encode 64-bit integers in 1-10 bytes. So, it saves space for smaller integers but might be less efficient for large integers (as 10 bytes in worst case).
-      - Previously, we used 2B to store keyLen & valLen -> total 4B. For smaller integers, these can fit in 1B each -> total 2B or 50% savings.
-      - To work with varints, swap out fixed 1KB buffer with bytes.Buffer that can be dynamically resized.
+  - Optimizaton-1: Varint Encoding [Ref](https://www.cloudcentric.dev/exploring-sstables/)
+    - e.g 64-bit integers require 8 bytes. With varint encoding, we can encode 64-bit integers in 1-10 bytes. So, it saves space for smaller integers but might be less efficient for large integers (as 10 bytes in worst case).
+    - Previously, we used 2B to store keyLen & valLen -> total 4B. For smaller integers, these can fit in 1B each -> total 2B or 50% savings.
+    - To work with varints, swap out fixed 1KB buffer with bytes.Buffer that can be dynamically resized.
+  - Optimizaton-2: Binary search using Index blocks (indexing structure for each file)
+    - If we know -- 1. stating point of each kv-pair (data block) and 2. total kv-pairs in a `.sst` file, we can apply binary search and reduce search time from O(n) to O(log n).
+    - We can glue this indexing structure to the end of `.sst` file.
+    - For binary search, we'll load the entire `.sst` into memory to parse the index block. With that, we can find the offset of each individual data block to locate its key. Once we know each key, we can use binary search to move from block to block as necessary.
+    - We're doing binary search on the index block but decide whether to drop left/right portion based on the key at that index.
+    - Note: index blocks incur a significant storage overhead of 10-15%.
+    - Interesting comparision of sequential vs binary search: [Ref](https://www.cloudcentric.dev/exploring-sstables/#benchmarking-binary-search)
+  - Optimization-4: Have smaller index blocks + avoid loading entire `.sst` into memory.
+    - Observation: Our filesystem works with a default size of 4096 bytes. Any data beyond 4KB will need > 1 block from disk -> > 1 disk IO. So, our data blocks are capped at 4096 bytes.
+    - New terminology: `data block` can have multiple `data entry` (individual kv-pair)
+    - Instead of having offset of each kv-pair (`data entry`), we can now have {starting offset of each `data block`, total length, largest key}.
+    - So, we'll use binary search across `data blocks` but sequential search within each `data block`. With block size of 4096 bytes, search will still be O(logn).
 
 ## Memtable
 - Most DBs use skiplists as underlying DS for memtable. Skiplist-based memtable provide good overall performance for both read/write operations regardless of whether sequential or random access patterns are used. [Ref](https://www.cloudcentric.dev/exploring-memtables/)
