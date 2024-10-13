@@ -1,6 +1,7 @@
 package db
 
 import (
+	"errors"
 	"fmt"
 	"log"
 	"lsm/memtable"
@@ -20,6 +21,7 @@ type MemTables struct {
 type DB struct {
 	memtables   MemTables
 	dataStorage *sstable.Provider
+	sstables    []*sstable.FileMetadata
 }
 
 func Open(dirname string) (*DB, error) {
@@ -53,7 +55,7 @@ func (d *DB) flushMemtables() error {
 	// update the queue to discard flushed memtables
 	d.memtables.queue = d.memtables.queue[n:]
 
-	for i:=0; i<len(flushable); i++ {
+	for i := 0; i < len(flushable); i++ {
 		meta := d.dataStorage.PrepareNewFile()
 		f, err := d.dataStorage.OpenFileForWriting(meta)
 		if err != nil {
@@ -70,6 +72,9 @@ func (d *DB) flushMemtables() error {
 		if err != nil {
 			return err
 		}
+
+		// add the new sstable to the list of sstables
+		d.sstables = append(d.sstables, meta)
 	}
 	return nil
 }
@@ -109,6 +114,33 @@ func (d *DB) Get(key []byte) ([]byte, error) {
 		}
 
 	}
+
+	// scan sstables from newest to oldest
+	for j := len(d.sstables) - 1; j >= 0; j-- {
+		meta := d.sstables[j]
+		f, err := d.dataStorage.OpenFileForReading(meta)
+		if err != nil {
+			return nil, err
+		}
+		r := sstable.NewReader(f)
+		defer r.Close()
+
+		var encodedValue *memtable.EncodedValue
+		encodedValue, err = r.Get(key)
+		if err != nil {
+			if errors.Is(err, fmt.Errorf("key not found")) {
+				continue
+			}
+			log.Fatal(err)
+		}
+		if encodedValue.IsTombstone() {
+			log.Printf(`Found key "%s" marked as deleted in sstable "%d".`, key, meta.FileNum())
+			return nil, errors.New("key not found")
+		}
+		log.Printf(`Found key "%s" in sstable "%d" with value "%s"`, key, meta.FileNum(), encodedValue.Value())
+		return encodedValue.Value(), nil
+	}
+
 	return nil, fmt.Errorf("key not found")
 }
 

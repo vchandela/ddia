@@ -49,7 +49,7 @@ func (w *Writer) writeDataBlock(key, encodedVal []byte) error {
 	return nil
 }
 
-// iterate over level 1 of the memtable
+// iterate over level 1 of the memtable and write each kv-pair to .sst file
 func (w *Writer) Convert(m *memtable.Memtable) error {
 	iter := m.Iterator()
 	for iter.HasNext() {
