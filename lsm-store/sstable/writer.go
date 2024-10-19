@@ -7,6 +7,8 @@ import (
 	"lsm/encoder"
 	"lsm/memtable"
 	"math"
+
+	"github.com/golang/snappy"
 )
 
 // If we exceed 90% of the maximum acceptable data block size after adding a new data entry,
@@ -29,7 +31,9 @@ type Writer struct {
 
 	offset       int    // offset of current data block.
 	bytesWritten int    // bytesWritten to current data block.
-	lastKey      []byte // lastKey in current data block
+	lastKey      []byte // lastKey (largest) in current data block
+
+	compressionBuf []byte // stores compressed data block
 }
 
 func NewWriter(file io.Writer) *Writer {
@@ -42,10 +46,11 @@ func NewWriter(file io.Writer) *Writer {
 	return w
 }
 
+// add largest key -> {offset, length} of data block to indexBlock.
 func (w *Writer) addIndexEntry() error {
 	buf := w.buf[:8]
-	binary.LittleEndian.PutUint32(buf[:4], uint32(w.offset))       // data block offset
-	binary.LittleEndian.PutUint32(buf[4:], uint32(w.bytesWritten)) // data block length
+	binary.LittleEndian.PutUint32(buf[:4], uint32(w.offset))              // data block offset
+	binary.LittleEndian.PutUint32(buf[4:], uint32(len(w.compressionBuf))) // data block length
 	_, err := w.indexBlock.add(w.lastKey, w.encoder.Encode(encoder.OpKindSet, buf))
 	if err != nil {
 		return err
@@ -59,7 +64,9 @@ func (w *Writer) flushDataBlock() error {
 	}
 
 	// write dataBlock buffer to underlying *.sst file
-	n, err := w.bw.ReadFrom(w.dataBlock.buf)
+	w.compressionBuf = snappy.Encode(w.compressionBuf, w.dataBlock.buf.Bytes())
+	w.dataBlock.buf.Reset()
+	_, err := w.bw.Write(w.compressionBuf)
 	if err != nil {
 		return err
 	}
@@ -71,7 +78,7 @@ func (w *Writer) flushDataBlock() error {
 	}
 
 	// updates the w.offset and w.bytesWritten for subsequent data blocks
-	w.offset += int(n)
+	w.offset += len(w.compressionBuf)
 	w.bytesWritten = 0
 	return nil
 }
@@ -95,6 +102,7 @@ func (w *Writer) ConvertMemtableToSST(m *memtable.Memtable) error {
 			}
 		}
 	}
+	// flush any pending data
 	err := w.flushDataBlock()
 	if err != nil {
 		return err

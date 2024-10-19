@@ -5,12 +5,15 @@ import (
 	"encoding/binary"
 )
 
+// maxBlockSize is the maximum size of a data block and index block.
 const (
 	maxBlockSize = 4096
 )
 
+// encapsulate operations that are common to preparing both index blocks 
+// and data blocks for writing to disk
 type blockWriter struct {
-	buf          *bytes.Buffer
+	buf          *bytes.Buffer //bytes.Buffer makes it easier to read/write/grow the buffer than []byte
 	offsets      []uint32
 	nextOffset   uint32
 	trackOffsets bool
@@ -37,15 +40,16 @@ func (b *blockWriter) trackOffset(n uint32) {
 	b.nextOffset += n
 }
 
-// index block and data block share similar logic for writing data as kv-pairs
-func (b *blockWriter) add(key, encodedVal []byte) (int, error) {
-	keyLen, valLen := len(key), len(encodedVal)
+// index block and data block share similar logic for writing kv-pairs (data entry)
+// data entry = keyLen|valLen|key|val
+func (b *blockWriter) add(key, val []byte) (int, error) {
+	keyLen, valLen := len(key), len(val)
 	needed := 2*binary.MaxVarintLen64 + keyLen + valLen
 	buf := b.scratchBuf(needed)
 	n := binary.PutUvarint(buf, uint64(keyLen))
 	n += binary.PutUvarint(buf[n:], uint64(valLen))
 	copy(buf[n:], key)
-	copy(buf[n+keyLen:], encodedVal)
+	copy(buf[n+keyLen:], val)
 	used := n + keyLen + valLen
 	n, err := b.buf.Write(buf[:used])
 	if err != nil {
@@ -57,6 +61,7 @@ func (b *blockWriter) add(key, encodedVal []byte) (int, error) {
 	return n, nil
 }
 
+// This method is only for index block.
 // Write all of the collected offsets into the final index block. 
 // Along with that it also records the total length of the index block, and the total number of offsets that were recorded
 // So, our footer size is 8 bytes.

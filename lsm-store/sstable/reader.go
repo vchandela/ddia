@@ -8,6 +8,8 @@ import (
 	"io"
 	"io/fs"
 	"lsm/encoder"
+
+	"github.com/golang/snappy"
 )
 
 const (
@@ -25,7 +27,9 @@ type Reader struct {
 	br       *bufio.Reader
 	buf      []byte
 	encoder  *encoder.Encoder
-	fileSize int64
+	fileSize int64 //.sst file size
+
+	compressionBuf []byte //read compressed data block into this buffer
 }
 
 func NewReader(file io.Reader) (*Reader, error) {
@@ -86,7 +90,7 @@ func (r *Reader) initFileSize() error {
 	return nil
 }
 
-// Read the *.sst footer into the supplied buffer.
+// Read the *.sst footer into the supplied buffer -- this takes one disk IO.
 func (r *Reader) readFooter() ([]byte, error) {
 	buf := r.buf[:footerSizeInBytes]
 	footerOffset := r.fileSize - footerSizeInBytes
@@ -97,6 +101,8 @@ func (r *Reader) readFooter() ([]byte, error) {
 	return buf, nil
 }
 
+// initialize it with {#offsets in index block, total length of index block} from the footer.
+// helps with loading entire index block in memory.
 func (r *Reader) prepareBlockReader(buf, footer []byte) *blockReader {
 	numOffsets := int(binary.LittleEndian.Uint32(footer[:4]))
 	indexLength := int(binary.LittleEndian.Uint32(footer[4:]))
@@ -108,6 +114,7 @@ func (r *Reader) prepareBlockReader(buf, footer []byte) *blockReader {
 	}
 }
 
+// load entire index block into memory.
 func (r *Reader) readIndexBlock(footer []byte) (*blockReader, error) {
 	b := r.prepareBlockReader(r.buf, footer)
 	indexOffset := r.fileSize - int64(len(b.buf))
@@ -146,6 +153,7 @@ func (r *Reader) sequentialSearchBuf(buf []byte, searchKey []byte) (*encoder.Enc
 	return nil, fmt.Errorf("key not found")
 }
 
+// load data block into memory.
 func (r *Reader) readDataBlock(indexEntry []byte) ([]byte, error) {
 	var err error
 	val := r.encoder.Parse(indexEntry).Value()
@@ -153,6 +161,10 @@ func (r *Reader) readDataBlock(indexEntry []byte) ([]byte, error) {
 	length := binary.LittleEndian.Uint32(val[4:]) // data block length
 	buf := r.buf[:length]
 	_, err = r.file.ReadAt(buf, int64(offset))
+	if err != nil {
+		return nil, err
+	}
+	buf, err = snappy.Decode(r.compressionBuf, buf)
 	if err != nil {
 		return nil, err
 	}

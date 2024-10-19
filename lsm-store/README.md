@@ -1,3 +1,19 @@
+## Compression
+- tradeoff b/w speed and size. Smaller the file, more the time take to decompress it. We'll use `snappy` for compression.
+  - Always benchmark, file size vs search time. e.g In our case, we saw 30% file size reduction but also 20-30% increase in search time.
+- Compression makes sense if you're storing large amounts of data. However, you're constantly decompressing data blocks from disk to load them in memory for searching, use `caching` to store the decompressed copies of frequently accessed data blocks in memory.
+  - So, real-world storage engines use `buffer pools` to cache decompressed data blocks.
+
+## Important Points: 
+- 1 data block != 1 memtable. Their relation depends on the memtable size limit and flush threshold.
+  - e.g memtable size limit < flush threshold -> 1 data block can have multiple memtable
+  - Practically, it is better to think in terms of records (kv-pairs) as workload might have lot of small kv-pairs or few exceptionally large kv-pairs.
+- In our case, sstable is ~8 KB. As they are not fixed size, we can't use binary search.
+  - We can make them fixed size using padding. However, this will lead to disk space wastage across all SSTables. Also, our write perf is degraded in case of small data. We have to pad everywhere unnecessarily.
+- Once the correct index block points to a data block, the actual search inside the data block can be done entirely in memory. Disk I/O becomes limited to loading the relevant blocks.
+- The size of the SSTable or the data it contains becomes less critical because binary search operates logarithmically, so even **a very large SSTable can be searched almost as quickly as a small one, provided the indexing is efficient** (load index block in memory -> load relevant data block in memory) and the number of disk accesses is controlled.
+- Even if the total amount of data stored in `.sst` is large, the number of disk seeks matters more than the size of the file itself, because once a block is read into memory, in-memory operations are much faster. In modern systems, `seek time` and `latency for disk access` are primary bottlenecks, not the amount of data.
+
 ## SSTable
 - Do buffered I/O of 4KB to match OS page size and block size on disks.
 - `storageManager` manages primary data folder of storage engine that contains all `.sst` files produced.
@@ -7,10 +23,12 @@
     - We made assumption that all kv-pairs with their metadata will fit into 1KiB size buffer.
     - 1KiB buffer allows size of key & val > 255 bytes -> we used uint16 (2B) to store keyLen & valLen.
     - 2 issues -- 1. user can enter larger blobs and 2. majority kv-pairs are short in size, so their lengths can fit in type smaller than uint16.
+
   - Optimizaton-1: Varint Encoding [Ref](https://www.cloudcentric.dev/exploring-sstables/)
     - e.g 64-bit integers require 8 bytes. With varint encoding, we can encode 64-bit integers in 1-10 bytes. So, it saves space for smaller integers but might be less efficient for large integers (as 10 bytes in worst case).
     - Previously, we used 2B to store keyLen & valLen -> total 4B. For smaller integers, these can fit in 1B each -> total 2B or 50% savings.
     - To work with varints, swap out fixed 1KB buffer with bytes.Buffer that can be dynamically resized.
+
   - Optimizaton-2: Binary search using Index blocks (indexing structure for each file)
     - If we know -- 1. stating point of each kv-pair (data block) and 2. total kv-pairs in a `.sst` file, we can apply binary search and reduce search time from O(n) to O(log n).
     - We can glue this indexing structure to the end of `.sst` file.
@@ -20,20 +38,24 @@
     - Interesting comparision of sequential vs binary search: [Ref](https://www.cloudcentric.dev/exploring-sstables/#benchmarking-binary-search)
       - When we are looking through small amounts of data (e.g., data fitting within a single 4 KiB block), sequential search may sometimes be faster.
       - When the amount of data read from disk becomes significantly larger, amortizing the cost of disk I/O operations, binary search is better.
-  - Optimization-4: Have smaller index blocks + avoid loading entire `.sst` into memory.
+
+  - Optimization-3: Have smaller index blocks + avoid loading entire `.sst` into memory.
     - Observation: Our filesystem works with a default size of 4096 bytes. Any data beyond 4KB will need > 1 block from disk -> > 1 disk IO. So, our data blocks are capped at 4096 bytes.
     - New terminology: `data block` can have multiple `data entry` (individual kv-pair)
     - In the index block, instead of having offset of each kv-pair (`data entry`), we can now have {starting offset of each `data block`, total length, largest key}.
-    - So, we'll use binary search across `data blocks` but sequential search within each `data block`. With block size of 4096 bytes, search will still be O(logn).
+    - So, we'll use binary search across `data blocks` using our `index block` but sequential search within each `data block`. With block size of 4096 bytes, search will still be O(logn).
     - For this, we'll load up only the index block into memory, and then use it to locate and load the specific data block in memory and perform sequential search.
     - This will allow us to search very big `*.sst` files with no more than 3 disk accesses.
       - 1 disk access to read the footer
       - another one to read the index block
+        - load this index block into memory
       - third one to read the data block
-    - The worst-case scenario is 3 times slower only because we are performing 3 times as many disk accesses. 3 disk accesses for the newest SSTable, and 9 disk accesses for the oldest SSTable.
-      - Looking up the first key in the middle data block of the newest SSTable (roughly the best-case scenario).
-      - Looking up the last key in the last data block of the oldest SSTable (roughly the worst-case scenario)
-    - The index block now only takes 1% of our `*.sst` files.
+        - load this data block into memory
+    - Best and worst case for search.
+      - Best: Looking up the first key in the 1st data block of the newest SSTable
+      - Worst: Looking up the last key in the last data block of the oldest SSTable
+      - We need to start with newest SSTable and go to oldest. So, no. of disk seeks if key found in nth SSTable = n*3.
+    - The index block now only takes 1% of our `*.sst` files. ![Alt text](./images/index.png)
 
 ## Memtable
 - Most DBs use skiplists as underlying DS for memtable. Skiplist-based memtable provide good overall performance for both read/write operations regardless of whether sequential or random access patterns are used. [Ref](https://www.cloudcentric.dev/exploring-memtables/)
