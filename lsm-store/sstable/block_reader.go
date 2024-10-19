@@ -5,6 +5,13 @@ import (
 	"encoding/binary"
 )
 
+type searchCondition int
+
+const (
+	moveUpWhenKeyGTE searchCondition = iota
+	moveUpWhenKeyGT
+)
+
 // for correct parsing of the index block
 type blockReader struct {
 	buf        []byte
@@ -17,6 +24,8 @@ func (b *blockReader) fetchDataFor(pos int) (kvOffset int, key, val []byte) {
 	var n int
 	kvOffset = int(binary.LittleEndian.Uint32(b.offsets[pos*4 : pos*4+4]))
 	offset := kvOffset
+	_, n = binary.Uvarint(b.buf[offset:]) // sharedLen = 0
+	offset += n
 	keyLen, n = binary.Uvarint(b.buf[offset:])
 	offset += n
 	valLen, n = binary.Uvarint(b.buf[offset:])
@@ -45,14 +54,14 @@ func (b *blockReader) readValAt(pos int) []byte {
 	return val
 }
 
-func (b *blockReader) search(searchKey []byte) int {
+func (b *blockReader) search(searchKey []byte, condition searchCondition) int {
 	low, high := 0, b.numOffsets
 	var mid int
 	for low < high {
 		mid = (low + high) / 2
 		key := b.readKeyAt(mid)
 		cmp := bytes.Compare(searchKey, key)
-		if cmp > 0 {
+		if cmp >= int(condition) {
 			low = mid + 1
 		} else {
 			high = mid

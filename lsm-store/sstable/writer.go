@@ -11,6 +11,11 @@ import (
 	"github.com/golang/snappy"
 )
 
+const (
+	dataBlockChunkSize  = 16
+	indexBlockChunkSize = 1
+)
+
 // If we exceed 90% of the maximum acceptable data block size after adding a new data entry,
 // we consider the data block to be full and suitable for flushing.
 var blockFlushThreshold = int(math.Floor(maxBlockSize * 0.9))
@@ -41,8 +46,7 @@ func NewWriter(file io.Writer) *Writer {
 	bw := bufio.NewWriter(file)
 	w.buf = make([]byte, 0, 8)
 	w.file, w.bw = file.(syncCloser), bw
-	w.dataBlock, w.indexBlock = newBlockWriter(), newBlockWriter()
-	w.indexBlock.trackOffsets = true
+	w.dataBlock, w.indexBlock = newBlockWriter(dataBlockChunkSize), newBlockWriter(indexBlockChunkSize)
 	return w
 }
 
@@ -63,10 +67,15 @@ func (w *Writer) flushDataBlock() error {
 		return nil // nothing to flush
 	}
 
+	err := w.dataBlock.finish()
+	if err != nil {
+		return err
+	}
+
 	// write dataBlock buffer to underlying *.sst file
 	w.compressionBuf = snappy.Encode(w.compressionBuf, w.dataBlock.buf.Bytes())
 	w.dataBlock.buf.Reset()
-	_, err := w.bw.Write(w.compressionBuf)
+	_, err = w.bw.Write(w.compressionBuf)
 	if err != nil {
 		return err
 	}

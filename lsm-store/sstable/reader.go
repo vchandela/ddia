@@ -16,6 +16,10 @@ const (
 	footerSizeInBytes = 8 // no.of offsets (4B) + len of index block (4B)
 )
 
+var (
+	ErrKeyNotFound = fmt.Errorf("key not found")
+)
+
 type statReaderAtCloser interface {
 	Stat() (fs.FileInfo, error)
 	io.ReaderAt // loading data blocks in memory using their indexed offsets & loading index blocks
@@ -76,7 +80,7 @@ func (r *Reader) sequentialSearch(searchKey []byte) (*encoder.EncodedValue, erro
 			return r.encoder.Parse(val), nil
 		}
 	}
-	return nil, fmt.Errorf("key not found")
+	return nil, ErrKeyNotFound
 }
 
 // Retrieve the size of the loaded *.sst file.
@@ -125,23 +129,29 @@ func (r *Reader) readIndexBlock(footer []byte) (*blockReader, error) {
 	return b, nil
 }
 
-func (r *Reader) sequentialSearchBuf(buf []byte, searchKey []byte) (*encoder.EncodedValue, error) {
+func (r *Reader) sequentialSearchChunk(chunk []byte, searchKey []byte) (*encoder.EncodedValue, error) {
+	var prefixKey []byte
 	var offset int
 	for {
 		var keyLen, valLen uint64
-		var n int
-		keyLen, n = binary.Uvarint(buf[offset:])
+		sharedLen, n := binary.Uvarint(chunk[offset:])
 		if n <= 0 {
 			break // EOF
 		}
 		offset += n
-		valLen, n = binary.Uvarint(buf[offset:])
+		keyLen, n = binary.Uvarint(chunk[offset:])
 		offset += n
-		key := r.buf[:keyLen]
-		copy(key[:], buf[offset:offset+int(keyLen)])
-		offset += int(keyLen)
-		val := buf[offset : offset+int(valLen)]
-		offset += int(valLen)
+		valLen, n = binary.Uvarint(chunk[offset:])
+		offset += n
+
+		key := r.buf[:sharedLen+keyLen]
+		if sharedLen == 0 {
+			prefixKey = key
+		}
+		copy(key[:sharedLen], prefixKey[:sharedLen])
+		copy(key[sharedLen:sharedLen+keyLen], chunk[offset:offset+int(keyLen)])
+		val := chunk[offset+int(keyLen) : offset+int(keyLen)+int(valLen)]
+
 		cmp := bytes.Compare(searchKey, key)
 		if cmp == 0 {
 			return r.encoder.Parse(val), nil
@@ -149,12 +159,13 @@ func (r *Reader) sequentialSearchBuf(buf []byte, searchKey []byte) (*encoder.Enc
 		if cmp < 0 {
 			break // Key is not present in this data block.
 		}
+		offset += int(keyLen) + int(valLen)
 	}
-	return nil, fmt.Errorf("key not found")
+	return nil, ErrKeyNotFound
 }
 
 // load data block into memory.
-func (r *Reader) readDataBlock(indexEntry []byte) ([]byte, error) {
+func (r *Reader) readDataBlock(indexEntry []byte) (*blockReader, error) {
 	var err error
 	val := r.encoder.Parse(indexEntry).Value()
 	offset := binary.LittleEndian.Uint32(val[:4]) // data block offset in *.sst file
@@ -168,32 +179,43 @@ func (r *Reader) readDataBlock(indexEntry []byte) ([]byte, error) {
 	if err != nil {
 		return nil, err
 	}
-	return buf, nil
+	b := r.prepareBlockReader(buf, buf[len(buf)-footerSizeInBytes:])
+	return b, nil
 }
 
 func (r *Reader) binarySearch(searchKey []byte) (*encoder.EncodedValue, error) {
-	// Load footer in memory.
 	footer, err := r.readFooter()
 	if err != nil {
 		return nil, err
 	}
 
-	// Load index block in memory.
+	// Search index block for data block.
 	index, err := r.readIndexBlock(footer)
 	if err != nil {
 		return nil, err
 	}
-	// Search index block for data block.
-	pos := index.search(searchKey)
+	pos := index.search(searchKey, moveUpWhenKeyGT)
+	if pos >= index.numOffsets {
+		// searchKey is greater than the largest key in the current *.sst
+		return nil, ErrKeyNotFound
+	}
 	indexEntry := index.readValAt(pos)
 
-	// Load data block in memory.
+	// Search data block for data chunk.
 	data, err := r.readDataBlock(indexEntry)
 	if err != nil {
 		return nil, err
 	}
+	offset := data.search(searchKey, moveUpWhenKeyGTE)
+	if offset <= 0 {
+		return nil, ErrKeyNotFound
+	}
+	chunkStart := data.readOffsetAt(offset - 1)
+	chunkEnd := data.readOffsetAt(offset)
+	chunk := data.buf[chunkStart:chunkEnd]
 
-	return r.sequentialSearchBuf(data, searchKey)
+	// Search data chunk for key.
+	return r.sequentialSearchChunk(chunk, searchKey)
 }
 
 func (r *Reader) Get(searchKey []byte) (*encoder.EncodedValue, error) {

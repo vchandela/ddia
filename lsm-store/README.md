@@ -1,3 +1,21 @@
+## Incremental Encoding
+- This is possible due to sorted kv-pairs. e.g prefix key = `accusantiumducimus` and shared prefix = `accustantium` ![Alt text](./images/incenc.png)
+  - This saves 44 bytes of data at the expense of the 5 bytes necessary for storing the sharedLen of each key-value pair, resulting in 39 bytes of data saved in total.
+- As a data block may have 100s of kv-pairs, we define a `restart interval` (`chunk size`) i.e how many keys will be incrementally encoded before we record another full key.
+  - So, `data block` -> `data chunk` -> `data entry` ![Alt text](./images/chunking.png)
+- We can keep track of the **offsets of our restart points** and put them at the end of our data block as a kind of `mini-index block`. 
+  - This might act as an index of our data chunks and enable binary search inside each data block, further accelerating our search operations. 
+  - Since incremental encoding allows us to save some space, we can afford to spare some of this space for storing the index.
+- Now, our primary index block will a regular block with a chunkSize of 1. So, all keys are stored completely without any shared prefix.
+- Both our index blocks and data blocks now contain indexed offsets. However, they have different meanings:
+  - Inside an index block, the key of each index entry tells us that all keys <= than a specific key are located in a particular data block.
+    - During binary search, we want to locate the right-most data block, where `searchKey` <= `largestDataBlockKey`.
+    - `index.search(searchKey, moveUpWhenKeyGT)`
+  - Inside a data block, each offset points to the very first key of a data chunk, and the very first key of a data chunk tells us that keys >= than this key are located in either this or one of the following data chunks
+    - So, when performing binary search, we want to locate the left-most data chunk, where `firstKey` > `searchKey`, as the searchKey will reside somewhere in the immediately preceding data chunk.
+    - `data.search(searchKey, moveUpWhenKeyGTE)`
+- So, is is no longer necessary to perform a sequential search on the entire data block. Instead, we can binary search the indexed offsets within the data block, locate the desired data chunk, and then only sequentially search the chunk.
+
 ## Compression
 - tradeoff b/w speed and size. Smaller the file, more the time take to decompress it. We'll use `snappy` for compression.
   - Always benchmark, file size vs search time. e.g In our case, we saw 30% file size reduction but also 20-30% increase in search time.
