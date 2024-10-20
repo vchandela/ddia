@@ -3,6 +3,7 @@ package memtable
 import (
 	"lsm/encoder"
 	"lsm/skiplist"
+	"lsm/storage"
 )
 
 type Memtable struct {
@@ -10,13 +11,15 @@ type Memtable struct {
 	sizeUsed  int // The approximate amount of space used by the Memtable so far (in bytes).
 	sizeLimit int // The maximum allowed size of the Memtable (in bytes).
 	encoder   *encoder.Encoder
+	logMeta   *storage.FileMetadata
 }
 
-func NewMemtable(sizeLimit int) *Memtable {
+func NewMemtable(sizeLimit int, logMeta *storage.FileMetadata) *Memtable {
 	m := &Memtable{
 		sl:        skiplist.NewSkipList(),
 		sizeLimit: sizeLimit,
 		encoder:   encoder.NewEncoder(),
+		logMeta:   logMeta,
 	}
 	return m
 }
@@ -55,4 +58,8 @@ func (m *Memtable) Size() int {
 
 func (m *Memtable) Iterator() *skiplist.Iterator {
 	return m.sl.Iterator()
+}
+
+func (m *Memtable) LogFile() *storage.FileMetadata {
+	return m.logMeta
 }

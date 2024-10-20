@@ -1,4 +1,4 @@
-package sstable
+package storage
 
 import (
 	"fmt"
@@ -18,6 +18,7 @@ type FileType int
 const (
 	FileTypeUnknown FileType = iota
 	FileTypeSSTable
+	FileTypeWAL
 )
 
 // file-level
@@ -28,6 +29,10 @@ type FileMetadata struct {
 
 func (f *FileMetadata) IsSSTable() bool {
 	return f.fileType == FileTypeSSTable
+}
+
+func (f *FileMetadata) IsWAL() bool {
+	return f.fileType == FileTypeWAL
 }
 
 func (f *FileMetadata) FileNum() int {
@@ -67,8 +72,11 @@ func (s *Provider) ListFiles() ([]*FileMetadata, error) {
 			return nil, err
 		}
 		fileType := FileTypeUnknown
-		if fileExtension == "sst" {
+		switch fileExtension {
+		case "sst":
 			fileType = FileTypeSSTable
+		case "log":
+			fileType = FileTypeWAL
 		}
 		meta = append(meta, &FileMetadata{
 			fileNum:  fileNumber,
@@ -83,20 +91,35 @@ func (s *Provider) nextFileNum() int {
 	return s.fileNum
 }
 
-func (s *Provider) PrepareNewFile() *FileMetadata {
+func (s *Provider) prepareNewFile(fileType FileType) *FileMetadata {
 	return &FileMetadata{
 		fileNum:  s.nextFileNum(),
-		fileType: FileTypeSSTable,
+		fileType: fileType,
 	}
 }
 
-func (s *Provider) makeFileName(fileNumber int) string {
-	return fmt.Sprintf("%06d.sst", fileNumber)
+func (s *Provider) PrepareNewSSTFile() *FileMetadata {
+	return s.prepareNewFile(FileTypeSSTable)
+}
+
+func (s *Provider) PrepareNewWALFile() *FileMetadata {
+	return s.prepareNewFile(FileTypeWAL)
+}
+
+func (s *Provider) makeFileName(fileNumber int, fileType FileType) string {
+	switch fileType {
+	case FileTypeSSTable:
+		return fmt.Sprintf("%06d.sst", fileNumber)
+	case FileTypeWAL:
+		return fmt.Sprintf("%06d.log", fileNumber)
+	case FileTypeUnknown:
+	}
+	panic("unknown file type")
 }
 
 func (s *Provider) OpenFileForWriting(meta *FileMetadata) (*os.File, error) {
 	const openFlags = os.O_RDWR | os.O_CREATE | os.O_EXCL
-	filename := s.makeFileName(meta.fileNum)
+	filename := s.makeFileName(meta.fileNum, meta.fileType)
 	file, err := os.OpenFile(filepath.Join(s.dataDir, filename), openFlags, 0644)
 	if err != nil {
 		return nil, err
@@ -106,10 +129,20 @@ func (s *Provider) OpenFileForWriting(meta *FileMetadata) (*os.File, error) {
 
 func (s *Provider) OpenFileForReading(meta *FileMetadata) (*os.File, error) {
 	const openFlags = os.O_RDONLY
-	filename := s.makeFileName(meta.fileNum)
+	filename := s.makeFileName(meta.fileNum, meta.fileType)
 	file, err := os.OpenFile(filepath.Join(s.dataDir, filename), openFlags, 0)
 	if err != nil {
 		return nil, err
 	}
 	return file, nil
+}
+
+func (s *Provider) DeleteFile(meta *FileMetadata) error {
+	name := s.makeFileName(meta.fileNum, meta.fileType)
+	path := filepath.Join(s.dataDir, name)
+	err := os.Remove(path)
+	if os.IsNotExist(err) {
+		return nil
+	}
+	return err
 }

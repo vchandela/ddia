@@ -1,3 +1,20 @@
+## WAL
+- Data durability and recoverability -- DML ops are first applied to a WAL (Write-Ahead Log) before being applied to the active memtable. 
+  - In case of failure, we replay the WAL to build the memtables (active and immutable ones not yet flushed to disk).
+- Format: records (DML ops) organized into data blocks (multiple of physical block size of HDD/SSD).
+  - Records are variable-sized so we pad the extra space in a data block if a record doesn't fit completely.
+    - For a record, we only need to load a single data block into memory. ![Alt text](./images/memtable-padding.png)
+- What if a record exceeds data block size?
+  - Solution: chunking -- chunks of the record are split across multiple data blocks. Also, each chunk can be processed **independently** of other chunks. ![Alt text](./images/memtable-chunking.png)
+- Each record is written to data block's buffer but immediately flushed & synced to WAL file.
+- 1:1 mapping between WAL file and memtable. 
+  - When a memtable is rotate, we also rotate the WAL file.
+  - If a memtable flushed to disk, the WAL file has to be deleted from disk, as it's no longer needed for data recovery as the memtable is now an SSTable.
+    - Depending on the size of the memtable queue, the storage engine may sometimes decide to flush multiple memtables at once, so we need to know which WAL files to delete.
+- Record format: datalen(2B)|chunkType(1B)|keyLen|valLen|key|opKind|val [Ref](https://www.cloudcentric.dev/building-a-write-ahead-log-in-go/#chunking-wal-records)
+  - 2 bytes enough for storing [1:4093] -- smallest and largest possible payload size.
+  - Payload = keyLen|valLen|key|opKind|val
+
 ## Incremental Encoding
 - This is possible due to sorted kv-pairs. e.g prefix key = `accusantiumducimus` and shared prefix = `accustantium` ![Alt text](./images/incenc.png)
   - This saves 44 bytes of data at the expense of the 5 bytes necessary for storing the sharedLen of each key-value pair, resulting in 39 bytes of data saved in total.
