@@ -1,9 +1,9 @@
 ### Sub-commands
 - `init`: `./wyag init [path]`
-- `hash-object`: `./wyag hash-object`
-  - converts existing file into git object
+- `hash-object`: `./wyag hash-object [-w] [-t TYPE] FILE`
+  - converts existing file into git object and store it (-w flag) or simply print the hash to stdout
   - low-level (plumbing) command
-- `cat-file`: `./wyag cat-file`
+- `cat-file`: `./wyag cat-file [type] [object]`
   - prints git object to stdout
   - low-level (plumbing) command
 
@@ -19,6 +19,7 @@
 
 - `.git` contains the following:
   - `.git/objects/`: object store
+    - `.git/objects/pack/`: contains the packfile (`.pack`) and index file of same name with (`.idx`) extension
   - `.git/refs/`: reference store
     - `.git/refs/heads`
     - `.git/refs/tags`
@@ -37,18 +38,26 @@
 - `Objects`: Files in the git repository, whose paths are determined by their contents.
   - **Almost everything in Git is an object**: actual files (source code), commits, tags, etc.
   - An object contains:
-    - `header`: specifies its type (`blob`, `commit`, `tag` or `tree`)
+    - `header`: specifies one of the **4 types** (`blob`, `commit`, `tag` or `tree`)
     - This is folowed by ASCII space (0X20)
     - size of the object as an ASCII number
     - null separator (0X00)
     - contents of the object
   - The objects (headers and contents) are stored compressed with zlib.
+  - `SHA-1 hash`: Git renders the hash as a lowercase hexadecimal string e.g `abcdef1234567890..` (length = 40 with 16 possible digits [a-f][0-9]), and splits it in two parts: , and the rest `cdef1234567890..`. 
+    - directory name: the first two character `ab`
+    - file name: the rest `cdef1234567890..`
+    - This is because most filesystems hate having too many files in a single directory and would slow down to a crawl.
+    - Git’s method creates 256 (16*16 for 1st 2 positions) possible intermediate directories.
+    ![object](./images/object.png)
+  - generic `GitObject`: 3 methods -- `serialize()`, `deserialize()`, and `init()`
 
-- `SHA-1 hash`: Git renders the hash as a lowercase hexadecimal string e.g `abcdef1234567890..` (length = 40 with 16 possible digits [a-f][0-9]), and splits it in two parts: , and the rest `cdef1234567890..`. 
-  - directory name: the first two character `ab`
-  - file name: the rest `cdef1234567890..`
-  - This is because most filesystems hate having too many files in a single directory and would slow down to a crawl.
-  - Git’s method creates 256 (16*16 for 1st 2 positions) possible intermediate directories.
+- `Blob`: simplest object type. The content of every file you put in git (main.c, logo.png, README.md) is stored as a blob.
+
+- `Packfile`: Git has 2 storage mechanismas -- **loose objects** and **packfiles**.
+  - packfiles are more efficient and complex than loose objects.
+  - a packfile is a compilation of loose objects (like a tar) but some are stored as deltas (as a transformation of another object). 
+  - we are not implementing them in wyag.
 
 ### Interesting tid-bits
 - Git compresses everything using zlib

@@ -1,6 +1,6 @@
 import configparser
 import os
-from .utils import repo_dir, repo_file, repo_default_config
+from ..utils.repo_utils import repo_dir, repo_file, repo_default_config
 
 def repo_find(path=".", required=True):
     """
