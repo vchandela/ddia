@@ -1,5 +1,5 @@
 from core.gitRepository import repo_find
-from utils.object_utils import object_read, object_find
+from utils.object import object_read, object_find
 import sys
 
 def cmd_cat_file(args):

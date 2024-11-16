@@ -1,5 +1,4 @@
 import argparse
-import collections
 from datetime import datetime
 import grp, pwd
 from fnmatch import fnmatch
@@ -48,6 +47,13 @@ argsp.add_argument("-w",
                    help="Actually write the object into the database")
 argsp.add_argument("path",
                    help="Read object from <file>")
+
+# log
+argsp = argsubparsers.add_parser("log", help="Display history of a given commit.")
+argsp.add_argument("commit",
+                   default="HEAD",
+                   nargs="?",
+                   help="Commit to start at.")
 
 def main(argv=sys.argv[1:]):
     args = argparser.parse_args(argv)

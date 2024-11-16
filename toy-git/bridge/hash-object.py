@@ -1,5 +1,5 @@
 from core.gitRepository import repo_find
-from utils.object_utils import object_hash
+from utils.object import object_hash
 
 def cmd_hash_object(args):
     if args.write:

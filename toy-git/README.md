@@ -6,6 +6,8 @@
 - `cat-file`: `./wyag cat-file [type] [object]`
   - prints git object to stdout
   - low-level (plumbing) command
+- `log`: `./wyag log [commit] > log.dot`; `dot -O -Tpdf log.dot`
+  - A much simpler version than what Git provides. We’ll dump Graphviz data and let the user use `dot` to render the actual log.
 
 ### Refereces
 1. https://wyag.thb.lt/
@@ -58,6 +60,20 @@
   - packfiles are more efficient and complex than loose objects.
   - a packfile is a compilation of loose objects (like a tar) but some are stored as deltas (as a transformation of another object). 
   - we are not implementing them in wyag.
+
+- `Commit`: It is an object that looks (uncompressed, without headers) like this: ![commit](./images/commit.png)
+    - `tree`: object that contains actual content of the commit: file contents, and where they go. A tree maps blobs IDs to filesystem locations, and describes a state of the work tree.
+    - `author` identity (name and email), and a timestamp;
+    - `committer` identity (name and email), and a timestamp;
+    - `parent`: reference to the parent commit. merge commits have multiple parents while very first commit has none.
+    - `gpgsig`: PGP signature of the commit object -- committed by person who owns the GPG private key and ensure the contents aren't tampered.
+    - `message`
+
+- Why `OrderedDict` for commits and tags?
+  - We want keys in sorted order so that fields always appear in same order.
+  - Git has 2 rules for object identity:
+    - **The same name will always refer to the same object**. This is because object name = hash of its contents.
+    - **The same object will always be referred by the same name.** This is why key ordering is important. If the ordering changes, SHA-1 will change -> name will change.
 
 ### Interesting tid-bits
 - Git compresses everything using zlib
