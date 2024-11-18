@@ -55,6 +55,22 @@ argsp.add_argument("commit",
                    nargs="?",
                    help="Commit to start at.")
 
+#ls-tree
+argsp = argsubparsers.add_parser("ls-tree", help="Pretty-print a tree object.")
+argsp.add_argument("-r",
+                   dest="recursive",
+                   action="store_true",
+                   help="Recurse into sub-trees")
+argsp.add_argument("tree",
+                   help="A tree-ish object.")
+
+#checkout
+argsp = argsubparsers.add_parser("checkout", help="Checkout a commit inside of a directory.")
+argsp.add_argument("commit",
+                   help="The commit or tree to checkout.")
+argsp.add_argument("path",
+                   help="The EMPTY directory to checkout on.")
+
 def main(argv=sys.argv[1:]):
     args = argparser.parse_args(argv)
     match args.command:

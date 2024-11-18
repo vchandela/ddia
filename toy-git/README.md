@@ -8,6 +8,8 @@
   - low-level (plumbing) command
 - `log`: `./wyag log [commit] > log.dot`; `dot -O -Tpdf log.dot`
   - A much simpler version than what Git provides. We’ll dump Graphviz data and let the user use `dot` to render the actual log.
+- `ls-tree`: `./wyag ls-tree [-r] TREE`
+  - prints contents of a tree, recursively with `-r` flag
 
 ### Refereces
 1. https://wyag.thb.lt/
@@ -62,7 +64,7 @@
   - we are not implementing them in wyag.
 
 - `Commit`: It is an object that looks (uncompressed, without headers) like this: ![commit](./images/commit.png)
-    - `tree`: object that contains actual content of the commit: file contents, and where they go. A tree maps blobs IDs to filesystem locations, and describes a state of the work tree.
+    - `tree`: object that contains actual content of the commit: file contents, and where they go. A tree maps blobs IDs to filesystem paths, and describes a state of the work tree.
     - `author` identity (name and email), and a timestamp;
     - `committer` identity (name and email), and a timestamp;
     - `parent`: reference to the parent commit. merge commits have multiple parents while very first commit has none.
@@ -74,6 +76,22 @@
   - Git has 2 rules for object identity:
     - **The same name will always refer to the same object**. This is because object name = hash of its contents.
     - **The same object will always be referred by the same name.** This is why key ordering is important. If the ordering changes, SHA-1 will change -> name will change.
+
+- `Tree`: maps actual file contents of a commit to filesystem paths. It is an []{[file mode](https://en.wikipedia.org/wiki/File-system_permissions), SHA-1, path}
+  - SHA-1 refers to either a blob or another tree object. If a blob, the path is a file, if a tree, it’s directory.
+  ![tree](./images/tree.png)
+  - To instantiate this tree in the filesystem, we first load object related with `.gitignore` and then for `LICENSE` and `README.md`. These are all blobs so we create a file for them with the blob's contents.
+  - The object associated with `src` is not a blob, but another tree: we’ll create the directory src and repeat the same operation in that directory with the new tree.
+  - Unlike tags and commits, tree objects are **binary objects**. Their format:
+  `[mode] space [path] 0x00 [sha-1]`
+    - `[mode]`: 6 bytes and octal repr. of file mode, stored in ASCII. e.g 100644 is encoded as 49 (ASCII “1”), 48 (ASCII “0”), 48, 54, 52, 52. First 2 digits encode file type (file, directory, symlink or submodule), the last four the permissions.
+    - 0X20 (ASCII space)
+    - null-terminated 0X00 path
+    - object's SHA-1 in binary encoding, on 20 bytes
+
+- `checkout`: simply instantiates a commit in the worktree.
+  - wyag's checkout will take two arguments: a commit, and a directory. Git checkout only needs a commit.
+  - it will then instantiate the tree in the directory, if and only if the directory is empty.  
 
 ### Interesting tid-bits
 - Git compresses everything using zlib
